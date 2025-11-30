@@ -1,8 +1,155 @@
 import re
+
 import pandas as pd
 
 RAW_CSV = "./planecrashinfo_accidents.csv"
 CLEAN_CSV = "./planecrashinfo_clean.csv"
+
+US_STATES = {
+    "Alabama",
+    "Alaska",
+    "Arizona",
+    "Arkansas",
+    "California",
+    "Colorado",
+    "Connecticut",
+    "Delaware",
+    "Florida",
+    "Georgia",
+    "Hawaii",
+    "Idaho",
+    "Illinois",
+    "Indiana",
+    "Iowa",
+    "Kansas",
+    "Kentucky",
+    "Louisiana",
+    "Maine",
+    "Maryland",
+    "Massachusetts",
+    "Michigan",
+    "Minnesota",
+    "Mississippi",
+    "Missouri",
+    "Montana",
+    "Nebraska",
+    "Nevada",
+    "New Hampshire",
+    "New Jersey",
+    "New Mexico",
+    "New York",
+    "North Carolina",
+    "North Dakota",
+    "Ohio",
+    "Oklahoma",
+    "Oregon",
+    "Pennsylvania",
+    "Rhode Island",
+    "South Carolina",
+    "South Dakota",
+    "Tennessee",
+    "Texas",
+    "Utah",
+    "Vermont",
+    "Virginia",
+    "Washington",
+    "West Virginia",
+    "Wisconsin",
+    "Wyoming",
+}
+
+US_ABBREVS = {
+    "AL",
+    "AK",
+    "AZ",
+    "AR",
+    "CA",
+    "CO",
+    "CT",
+    "DE",
+    "FL",
+    "GA",
+    "HI",
+    "ID",
+    "IL",
+    "IN",
+    "IA",
+    "KS",
+    "KY",
+    "LA",
+    "ME",
+    "MD",
+    "MA",
+    "MI",
+    "MN",
+    "MS",
+    "MO",
+    "MT",
+    "NE",
+    "NV",
+    "NH",
+    "NJ",
+    "NM",
+    "NY",
+    "NC",
+    "ND",
+    "OH",
+    "OK",
+    "OR",
+    "PA",
+    "RI",
+    "SC",
+    "SD",
+    "TN",
+    "TX",
+    "UT",
+    "VT",
+    "VA",
+    "WA",
+    "WV",
+    "WI",
+    "WY",
+}
+
+KNOWN_COUNTRIES = {
+    "United States",
+    "USA",
+    "U.S.A.",
+    "U.S.",
+    "United States of America",
+    "Canada",
+    "Mexico",
+    "England",
+    "United Kingdom",
+    "UK",
+    "Scotland",
+    "Wales",
+    "Northern Ireland",
+    "France",
+    "Germany",
+    "Belgium",
+    "Italy",
+    "Spain",
+    "Portugal",
+    "Netherlands",
+    "Switzerland",
+    "Austria",
+    "Sweden",
+    "Norway",
+    "Finland",
+    "Denmark",
+    "Russia",
+    "Soviet Union",
+    "Japan",
+    "China",
+    "India",
+    "Australia",
+    "New Zealand",
+    "Brazil",
+    "Argentina",
+    "Chile",
+    "South Africa",
+}
 
 
 def read_raw_data(path: str) -> pd.DataFrame:
@@ -107,17 +254,25 @@ def parse_fatalities(text: str):
 def split_location(loc: str):
     """
     Heuristic split of location → (city, state, country).
+
+    Returns
+    -------
+    (city_region, state_region, country)
     """
     if pd.isna(loc):
         return None, None, None
 
     s = str(loc).strip()
+    if not s:
+        return None, None, None
 
     # If there is no comma at all, treat as region or country
     if "," not in s:
-        if any(ctry in s for ctry in ["Germany", "France", "Belgium", "Italy", "England"]):
+        # Standalone country name or contains one of our known country tokens
+        if s in KNOWN_COUNTRIES or any(ctry in s for ctry in KNOWN_COUNTRIES):
             return None, None, s
         else:
+            # e.g. "Atlantic Ocean", "Near Tokyo"
             return s, None, None
 
     parts = [p.strip() for p in s.split(",") if p.strip()]
@@ -126,11 +281,21 @@ def split_location(loc: str):
     elif len(parts) == 2:
         city_region = parts[0]
         last = parts[1]
-        known_countries = {"England", "Germany", "France", "Belgium", "Italy"}
-        if last in known_countries:
+
+        # Normalize obvious country names
+        if last in KNOWN_COUNTRIES:
             return city_region, None, last
-        else:
-            return city_region, last, None
+
+        # If the second part is a US state or abbreviation, infer United States
+        if last in US_STATES or last in US_ABBREVS:
+            return city_region, last, "United States"
+
+        # Sometimes the second part might contain a country token, keep it as country
+        if any(ctry in last for ctry in KNOWN_COUNTRIES):
+            return city_region, None, last
+
+        # Fallback: treat it as region/state with unknown country
+        return city_region, last, None
     else:
         city_region = parts[0]
         state = parts[1]
@@ -201,7 +366,9 @@ def clean_dataset(df: pd.DataFrame) -> pd.DataFrame:
         df["fatalities_crew"] = totals.apply(lambda x: x[2])
 
         df["fatalities_total"] = pd.to_numeric(df["fatalities_total"], errors="coerce")
-        df["fatalities_passengers"] = pd.to_numeric(df["fatalities_passengers"], errors="coerce")
+        df["fatalities_passengers"] = pd.to_numeric(
+            df["fatalities_passengers"], errors="coerce"
+        )
         df["fatalities_crew"] = pd.to_numeric(df["fatalities_crew"], errors="coerce")
 
     # Location split
@@ -213,7 +380,9 @@ def clean_dataset(df: pd.DataFrame) -> pd.DataFrame:
 
     # Ground fatalities numeric
     if "ground_fatalities" in df.columns:
-        df["ground_fatalities"] = pd.to_numeric(df["ground_fatalities"], errors="coerce")
+        df["ground_fatalities"] = pd.to_numeric(
+            df["ground_fatalities"], errors="coerce"
+        )
 
     return df
 
